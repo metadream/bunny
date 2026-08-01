@@ -72,17 +72,58 @@ export class HttpError extends Error {
     }
 }
 
-/** In-memory session storage. Used internally by `Context.session`. */
+/**
+ * In-memory session storage. Used internally by `Context.session`.
+ * Sessions expire after a period of inactivity (sliding TTL).
+ */
 export class SessionStore {
-    private sessions = new Map<string, Record<string, unknown>>();
+    /** Session inactivity timeout in milliseconds. */
+    private ttl: number;
+    /** How often expired sessions are swept from memory, in milliseconds. */
+    private static readonly sweepInterval = 5 * 60 * 1000;
+    private sessions = new Map<string, { data: Record<string, unknown>; lastAccess: number }>();
+    private timer?: ReturnType<typeof setInterval>;
 
-    /** Get session data by ID. */
-    get(sid: string): Record<string, unknown> | undefined {
-        return this.sessions.get(sid);
+    constructor(ttl = 60 * 60 * 1000) {
+        this.ttl = ttl;
     }
+
+    /** Get session data by ID. Returns undefined (and removes) if the session has expired. Refreshes `lastAccess` on access. */
+    get(sid: string): Record<string, unknown> | undefined {
+        const s = this.sessions.get(sid);
+        if (!s) return undefined;
+        if (Date.now() - s.lastAccess > this.ttl) {
+            this.sessions.delete(sid);
+            return undefined;
+        }
+        s.lastAccess = Date.now();
+        return s.data;
+    }
+
     /** Set session data by ID. */
     set(sid: string, data: Record<string, unknown>): void {
-        this.sessions.set(sid, data);
+        this.sessions.set(sid, { data, lastAccess: Date.now() });
+        this.startSweeper();
+    }
+
+    /** Remove a session by ID. */
+    delete(sid: string): void {
+        this.sessions.delete(sid);
+    }
+
+    /** Start the periodic sweep on first use. Unref'd so it never blocks process exit. */
+    private startSweeper(): void {
+        if (this.timer) return;
+        this.timer = setInterval(() => this.purge(), SessionStore.sweepInterval);
+        (this.timer as { unref?: () => void } | undefined)?.unref?.();
+    }
+
+    /** Remove all sessions that have been inactive longer than the TTL. */
+    private purge(): void {
+        const now = Date.now();
+        for (const [sid, s] of this.sessions) {
+            if (now - s.lastAccess > this.ttl) this.sessions.delete(sid);
+        }
     }
 }
 
@@ -232,7 +273,7 @@ export class Context {
             },
             destroy(): void {
                 self._sessionData = {};
-                sessionStore.set(self._sessionSid!, {});
+                sessionStore.delete(self._sessionSid!);
                 self.cookies.delete(SESSION_COOKIE);
             },
         };
