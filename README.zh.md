@@ -205,7 +205,9 @@ app.get("/logout", async (c) => {
 | `remove(key)` | 删除单个字段 |
 | `destroy()` | 清空所有数据并使 cookie 过期 |
 
-Session ID 通过 `SESS_ID` cookie（`HttpOnly`、`SameSite=Lax`）传递。数据存储在默认的 `SessionStore` 内存中，重启服务后所有会话将丢失。
+Session ID 通过 `SESS_ID` cookie（`HttpOnly`、`SameSite=Lax`，会话 cookie——浏览器关闭即失效）传递。数据存储在默认的 `SessionStore` 内存中，重启服务后所有会话将丢失。
+
+会话在**连续 1 小时无操作**后过期（滑动过期）：每次读写都会刷新计时，因此活跃使用的会话不会掉线，只有超过 1 小时没有任何交互的会话才会被清除。已过期的会话每 5 分钟从内存中清扫一次，`destroy()` 会立即移除会话条目。
 
 ## Cookies
 

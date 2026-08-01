@@ -205,7 +205,9 @@ app.get("/logout", async (c) => {
 | `remove(key)` | Remove a single key |
 | `destroy()` | Clear all data and expire the session cookie |
 
-Session ID is stored in a `SESS_ID` cookie (`HttpOnly`, `SameSite=Lax`). Data is held in memory by the default `SessionStore` — restarting the server clears all sessions.
+Session ID is stored in a `SESS_ID` cookie (`HttpOnly`, `SameSite=Lax`, session cookie — cleared when the browser closes). Data is held in memory by the default `SessionStore` — restarting the server clears all sessions.
+
+Sessions expire after **1 hour of inactivity** (sliding TTL): every read or write refreshes the timer, so an actively-used session never times out, and a session is only dropped after an hour without any interaction. Expired sessions are swept from memory every 5 minutes, and `destroy()` removes the session entry immediately.
 
 ## Cookies
 
