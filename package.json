@@ -1,6 +1,6 @@
 {
   "name": "focal-bunny",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "license": "MIT",
   "description": "A lightweight web framework for Bun & Deno with zero dependencies",
   "repository": "https://github.com/metadream/focal-bunny.git",
@@ -9,6 +9,12 @@
   "jsr": {
     "name": "@focal/bunny",
     "exports": "./bunny.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./bunny.ts",
+      "default": "./bunny.ts"
+    }
   },
   "devDependencies": {
     "@types/bun": "^1.3.13"
