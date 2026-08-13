@@ -1,6 +1,7 @@
 import "./bun-shim.ts";
 import { resolve } from "node:path";
 import { Mustache } from "./mustache.ts";
+export { safeHtml } from "./mustache.ts";
 
 type RouteMethod = (pattern: string, arg1: Function | string, arg2?: Function) => void;
 const SESSION_COOKIE = "SESS_ID";

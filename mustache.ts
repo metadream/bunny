@@ -9,6 +9,7 @@ const Syntax = {
     INTERPOLATE: /\{\{=([\s\S]+?)\}\}/g,
     CONDITIONAL: /\{\{\?(\?)?\s*([\s\S]*?)\s*\}\}/g,
     ITERATIVE: /\{\{~\s*(?:\}\}|([\s\S]+?)\s*\:\s*([\w$]+)\s*(?:\:\s*([\w$]+))?\s*\}\})/g,
+    SCRIPT: /<script\b[^>]*>([\s\S]*?)<\/script\s*>/g,
 };
 
 /** Variable pattern */
@@ -21,6 +22,22 @@ const Variable = {
     BOUNDARY: /^,+|,+$/g,
     SPLIT2: /^$|,+/,
 };
+
+/**
+ * 注入到编译后函数体中的转义辅助函数。
+ * 必须以纯 JS 编写（无 TS 类型注解），因为会被拼进 `new Function` 的源码中执行。
+ * `htmlSafe`：HTML 上下文，做实体转义；`scriptSafe`：script 上下文，JSON 序列化并把 `<` 转 `\u003c` 防 `</script>` 注入。
+ * 两者都先识别 `safeHtml()` 标记，命中则原样输出。
+ */
+const helpers = String.raw`
+function htmlSafe(value){
+  if(!!value&&typeof value==="object"&&"__html" in value)return value.__html;
+  return String(value==null?"":value).replace(/[&<>"']/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch];});
+}
+function scriptSafe(value){
+  if(!!value&&typeof value==="object"&&"__html" in value)return value.__html;
+  return JSON.stringify(value==null?null:value).replace(/</g,"\\u003c");
+}`;
 
 /** Renderer function type */
 type Renderer = (data: unknown) => Promise<string>;
@@ -37,6 +54,14 @@ async function readTextFile(path: string) {
         return import("fs").then((fs) => fs.promises.readFile(path, "utf8"));
     }
     throw new Error("Unsupported runtime");
+}
+
+/**
+ * 声明一个值已是安全的 HTML/JS 内容，渲染 `{{= expr }}` 时跳过自动转义。
+ * 返回 `{ __html }` 标记对象，由 htmlSafe/scriptSafe 识别后原样输出。
+ */
+export function safeHtml(value: unknown): { __html: string } {
+    return { __html: String(value ?? "") };
 }
 
 /**
@@ -79,12 +104,22 @@ export class Mustache {
     compile(tmpl: string): Renderer {
         const codes: string[] = [];
         tmpl = this.block(tmpl);
-        tmpl = this.escape(this.reduce(tmpl))
-            .replace(Syntax.INTERPOLATE, (_: string, code: string) => {
+        tmpl = this.escape(this.reduce(tmpl));
+
+        // 自动转义：script 块内的插值走 JSON 序列化（scriptSafe），其余走 HTML 实体转义（htmlSafe）
+        tmpl = tmpl.replace(Syntax.SCRIPT, (block: string) =>
+            block.replace(Syntax.INTERPOLATE, (_: string, code: string) => {
                 code = this.unescape(code);
                 codes.push(code);
-                return "'+(" + code + ")+'";
-            })
+                return "'+(" + "scriptSafe(" + code + ")" + ")+'";
+            }),
+        );
+        tmpl = tmpl.replace(Syntax.INTERPOLATE, (_: string, code: string) => {
+            code = this.unescape(code);
+            codes.push(code);
+            return "'+(" + "htmlSafe(" + code + ")" + ")+'";
+        });
+        tmpl = tmpl
             .replace(Syntax.CONDITIONAL, (_: string, elseCase: string, code: string) => {
                 if (!code) return this.output(elseCase ? "}else{" : "}");
                 code = this.unescape(code);
@@ -105,7 +140,7 @@ export class Mustache {
             });
 
         let source = "let out='" + tmpl + "';return out;";
-        source = this.declare(codes) + source;
+        source = helpers + this.declare(codes) + source;
 
         try {
             const fn = new Function("data", source);
